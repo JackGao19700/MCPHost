@@ -8,7 +8,7 @@ from customizedLogger import FileLogger
 myLogger=FileLogger("log/mcphost.log",delay=False)
 
 
-def toolDeclare(toolname,toolDescription,toolInputSchema):
+def toolDescriptionForLLM(toolname,toolDescription,toolInputSchema):
     toolStr={
         "type": "function",
         "function": {

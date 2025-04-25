@@ -25,9 +25,9 @@ class llmModelWrapper:
         raise NotImplementedError("Subclasses should implement this!")
 
 class OpenAIModel(llmModelWrapper):
-    def __init__(self,envKeyName,apiBaseUrl,modelName):
+    def __init__(self,api_key,apiBaseUrl,modelName):
         self.modelName=modelName
-        self.llmClient = OpenAI(api_key=os.environ.get(envKeyName),base_url=apiBaseUrl)
+        self.llmClient = OpenAI(api_key=api_key,base_url=apiBaseUrl)
 
         self.llmClientConfig={
             # "model": self.modelName,
