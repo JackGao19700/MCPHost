@@ -99,14 +99,21 @@ class MCPHost:
         role,content=self.llmModel.getMessageFromChoice(choice)
         return f"Assistant>\t {content}"
 
-async def main(llmModel:llmModelWrapper,systemPrompt:str,serverParameters:StdioServerParameters):
+async def main(llmModel:llmModelWrapper,systemPrompt:str,
+               serverParametersList:Optional[list[StdioServerParameters]],
+               serverUrlList:Optional[list[str]]):
     # if len(sys.argv)<2:
     #     print("Usage: uv run client.py <URL of SSE MCP server (i.e. http://localhost:8080/sse)>")
     #     sys.exit(1)
-
     myMCPHost=MCPHost(llmModel,systemPrompt)
     try:
-        await myMCPHost.connect_to_stdio_server(serverParameters)
+        if serverParametersList:
+            for serverParameters in serverParametersList:
+                await myMCPHost.connect_to_stdio_server(serverParameters)
+        if serverUrlList:
+            for serverUrl in serverUrlList:
+                await myMCPHost.connect_to_sse_server(serverUrl)
+
         await myMCPHost.chatLoop()
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -119,12 +126,14 @@ if __name__ == "__main__":
     api_key = os.environ.get("DEEPSEEK_API_KEY")
     api_base_url=os.environ.get("DEEPSEEK_API_BASE_URL")
     api_model_name=os.environ.get("DEEPSEEK_API_MODEL_NAME")
+    brave_api_key=os.environ.get("BRAVE_API_KEY")
 
     llmModel=OpenAIModel(api_key,api_base_url,api_model_name)
     #llmModel=localOllamaModel("qwen2.5:latest")
 
     systemPrompt="你是一个智能助手，你的名字叫Jack.请调用工具,然后回答用户问题"
-    serverParameters=StdioServerParameters(
+    serverParametersList=[]
+    serverParametersList.append(StdioServerParameters(
         command="npx",  # Executable
         args=[
                 "-y",
@@ -133,8 +142,18 @@ if __name__ == "__main__":
                 "J:\\mcpserverDemo\\mcpClient"
             ],
         env={"MCP_SERVER": "weather"}
-    )
+    ))
+
+    serverParametersList.append(StdioServerParameters(
+        command="npx",  # Executable
+        args=[
+                "-y",
+                "@modelcontextprotocol/server-brave-search",
+            ],
+        env={"BRAVE_API_KEY": brave_api_key}
+    ))
+
 
     # 使用 asyncio.run 来运行异步函数
-    asyncio.run(main(llmModel,systemPrompt,serverParameters))
+    asyncio.run(main(llmModel,systemPrompt,serverParametersList,None))
 
