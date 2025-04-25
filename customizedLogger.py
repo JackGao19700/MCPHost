@@ -10,7 +10,7 @@ class FileLogger:
         self.logger.setLevel(logging.INFO)
 
         # 创建 FileHandler 并设置 delay 为 False
-        self.file_handler = logging.FileHandler('../mcpClient/log/mcphost.txt', delay=delay)
+        self.file_handler = logging.FileHandler('../mcpClient/log/mcphost.txt', delay=delay,encoding='utf-8')
         self.file_handler.setLevel(logging.INFO)
 
         log_format = '%(asctime)s - %(levelname)s - %(message)s'
@@ -19,7 +19,13 @@ class FileLogger:
 
         self.logger.addHandler(self.file_handler)
     def __call__(self,*args):
-        self.logger.info(*args)
-        if not self.delay:
-            self.file_handler.flush()
+        try:
+            self.logger.info(*args)
+            if not self.delay:
+                self.file_handler.flush()
+        except Exception as e:
+            print(f"Error writing to file: {e}")
+        finally:
+            pass
+
 
