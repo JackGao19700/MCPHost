@@ -220,24 +220,27 @@ class MCPHost:
 
     async def cleanup(self):
         """Properly clean up the session and streams"""
-        if self._session_context:
-            await self._session_context.__aexit__(None, None, None)
-        if self._streams_context:
-            await self._streams_context.__aexit__(None, None, None)
+        try:
+            if self._session_context:
+                await self._session_context.__aexit__(None, None, None)
+            if self._streams_context:
+                await self._streams_context.__aexit__(None, None, None)
+        except Exception as e:
+            myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> Cleanup error: {e}")
 
     async def chatLoop(self):
         """Run an interactive chat loop"""
         print("\nMCP Host Started!")
         print("Type your queries or 'quit' to exit.")
         while True:
-            # try:
+            try:
                 user_query = input("\nQuery:").strip()
                 if user_query.lower() == "quit":
                     break
                 response=await self.process_query(user_query)
                 print("\n" + response)
-            # except Exception as e:
-            #     print(f"Error: {e}")
+            except Exception as e:
+                 print(f"Error: {e}")
 
     async def execute_tool(self, funcName, funcArgs):
         """Execute the tool function with the provided arguments"""
@@ -262,19 +265,6 @@ class MCPHost:
         messages.append(userMessage)
         choice = self.llmModel.Chat(messages, self.mcp_tools)
         self.llmModel.addMessageFromChoice(messages,choice)
-
-        # role,content=self.llmModel.getMessageFromChoice(choice)
-        # messages.append({
-        #     "role": role,
-        #     "content": content
-        # })
-
-        # if isinstance(self.llmModel,OpenAIModel):
-        #     # for OpanAI Model Interface call:
-        #     messages.append(choice.message)
-        # else:
-        #     # for Ollama Model call
-        #     messages.append(choice["message"])
 
         toolsToCall=self.llmModel.ParseToolCallMessage(choice)
         for funName, funcArgs, tool_call_id in toolsToCall:
@@ -304,12 +294,15 @@ async def main(llmModel:llmModelWrapper,systemPrompt:str,serverParameters:StdioS
     #     print("Usage: uv run client.py <URL of SSE MCP server (i.e. http://localhost:8080/sse)>")
     #     sys.exit(1)
 
-    jackMCPHost=MCPHost(llmModel,systemPrompt)
+    myMCPHost=MCPHost(llmModel,systemPrompt)
     try:
-        await jackMCPHost.connect_to_stdio_server(serverParameters)
-        await jackMCPHost.chatLoop()
+        await myMCPHost.connect_to_stdio_server(serverParameters)
+        await myMCPHost.chatLoop()
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> running error: {e}")
     finally:
-        await jackMCPHost.cleanup()
+        await myMCPHost.cleanup()
 
 if __name__ == "__main__":
     api_key_name = "DEEPSEEK_API_KEY"
