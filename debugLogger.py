@@ -10,7 +10,7 @@ class FileLogger:
         self.logger.setLevel(logging.INFO)
 
         # 创建 FileHandler 并设置 delay 为 False
-        self.file_handler = logging.FileHandler('../mcpClient/log/mcphost.txt', delay=delay,encoding='utf-8')
+        self.file_handler = logging.FileHandler(logFilePath, delay=delay,encoding='utf-8')
         self.file_handler.setLevel(logging.INFO)
 
         log_format = '%(asctime)s - %(levelname)s - %(message)s'

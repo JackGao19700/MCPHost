@@ -1,37 +1,29 @@
 import inspect
 import os
-import dotenv
-
 import re
-import requests
-import json
 
 import asyncio
-from contextlib import AsyncExitStack
 from typing import Optional
 
 from dotenv import load_dotenv
-from mcp import ClientSession,StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp.client.sse import sse_client
-from mcp.types import CallToolResult
+from mcp import StdioServerParameters
 
 from MCPHost import MCPHost
-from helperFun import myLogger,toolDescriptionForLLM,serialize_MCPCallToResult
+from helperFun import myLogger
 from llmModel import llmModelWrapper,OpenAIModel,localOllamaModel
 async def main(llmModel:llmModelWrapper,systemPrompt:str,
-               serverParametersList:Optional[list[StdioServerParameters]],
-               serverUrlList:Optional[list[str]]):
-    # if len(sys.argv)<2:
-    #     print("Usage: uv run client.py <URL of SSE MCP server (i.e. http://localhost:8080/sse)>")
-    #     sys.exit(1)
+               localServers:Optional[list[tuple[str,StdioServerParameters]]],
+               remoteServers:Optional[list[tuple[str,str]]]):
+
     myMCPHost=MCPHost(llmModel,systemPrompt)
     try:
-        if serverParametersList:
-            for serverParameters in serverParametersList:
+        if localServers:
+            for server_name,serverParameters in localServers:
+                print(f"Connecting to server<{server_name}>...")
                 await myMCPHost.connect_to_stdio_server(serverParameters)
-        if serverUrlList:
-            for serverUrl in serverUrlList:
+        if remoteServers:
+            for server_name,serverUrl in remoteServers:
+                print(f"Connecting to server<{server_name}>...")
                 await myMCPHost.connect_to_sse_server(serverUrl)
 
         await myMCPHost.chatLoop()
@@ -68,9 +60,24 @@ def getMCPServersConfig(file_path):
     import json
 
     stdio_servers = []
+    sse_servers=[]
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
-            config_data = json.load(file)
+            content = file.read()
+            # 移除多行注释 '/*' '*/' 括号内的内容
+            content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+            # 移除行注释  '///' 后的内容.
+            content = re.sub(r'///.*', '', content)
+            # 移除空行
+            content = '\n'.join(line for line in content.split('\n') if line.strip())
+            content = re.sub(r'\\#', '#', content)
+            myLogger(f"config file <{file_path}>:")
+            myLogger(f"-------content start---------")
+            for i,line in enumerate(content.splitlines()):
+                myLogger(f"{i:03d}:{line}")
+            myLogger(f"-------content end----------")
+
+            config_data = json.loads(content)
             # 预处理配置数据，替换环境变量
             config_data = replace_env_vars_recursive(config_data)
             mcp_servers = config_data.get('mcpServers', {})
@@ -78,8 +85,12 @@ def getMCPServersConfig(file_path):
             for server_name, server_config in mcp_servers.items():
                 myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> server name:{server_name}")
                 try:
-                    stdio_server = StdioServerParameters(**server_config)
-                    stdio_servers.append(stdio_server)
+                    sse_server_url= server_config.get("url")
+                    if sse_server_url is not None:
+                        sse_servers.append((server_name,sse_server_url))
+                    else:
+                        stdio_server = StdioServerParameters(**server_config)
+                        stdio_servers.append((server_name,stdio_server))
                 except Exception as e:
                     myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> server config error:\n\tname:{server_name}\n\tconfig:{server_config}\n\t error:{e}")
                 finally:
@@ -91,12 +102,13 @@ def getMCPServersConfig(file_path):
     except json.JSONDecodeError as e:
         print(f"解析文件 {file_path} 时发生 JSON 解码错误: {e}")
         myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> 解析文件 {file_path} 时发生 JSON 解码错误: {e}")
-    return stdio_servers
+
+    return stdio_servers,sse_servers
 
 def configReadingTest():
     load_dotenv(dotenv_path="./.env")  # load environment variables from.env
     # 使用示例
-    file_path = 'J:/mcpserverDemo/MCPHost/mcpservers.config'
+    file_path = './mcpservers.config'
     servers = getMCPServersConfig(file_path)
     for server in servers:
         print(server)
@@ -110,23 +122,22 @@ def OpenAIModelTest():
     llmModel=OpenAIModel(api_key,api_base_url,api_model_name)
 
     file_path = './mcpservers.config'
-    serverParametersList = getMCPServersConfig(file_path)
+    localServersList,remoteServersList = getMCPServersConfig(file_path)
     systemPrompt="你是一个智能助手，你的名字叫Jack.请调用工具,然后回答用户问题"
 
     # 使用 asyncio.run 来运行异步函数
-    asyncio.run(main(llmModel,systemPrompt,serverParametersList,None))
+    asyncio.run(main(llmModel,systemPrompt,localServersList,remoteServersList))
 
 def localOllamaModelTest():
     load_dotenv(dotenv_path="./.env")  # load environment variables from.env
     llmModel=localOllamaModel("qwen2.5:latest")
 
-    systemPrompt="你是一个智能助手，你的名字叫Jack.请调用工具,然后回答用户问题"
     file_path = './mcpservers.config'
-    serverParametersList = getMCPServersConfig(file_path)
+    localServerParametersList,remoteServerParametersList = getMCPServersConfig(file_path)
     systemPrompt="你是一个智能助手，你的名字叫Jack.请调用工具,然后回答用户问题"
 
     # 使用 asyncio.run 来运行异步函数
-    asyncio.run(main(llmModel,systemPrompt,serverParametersList,None))
+    asyncio.run(main(llmModel,systemPrompt,localServerParametersList,remoteServerParametersList))
 
 
 if __name__ == "__main__":
