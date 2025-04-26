@@ -1,24 +1,11 @@
 import inspect
-import os
-import dotenv
+import traceback
 
-import re
 import requests
-import json
 
-import asyncio
-from contextlib import AsyncExitStack
-from typing import Optional
-
-from dotenv import load_dotenv
-from mcp import ClientSession,StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp.client.sse import sse_client
-from mcp.types import CallToolResult
-
+from mcp import StdioServerParameters
 from MCPClientSessionManager import MCPClientSessionManager
-from helperFun import myLogger,toolDescriptionForLLM,serialize_MCPCallToResult
-from llmModel import llmModelWrapper,OpenAIModel,localOllamaModel
+from helperFun import myLogger,serialize_MCPCallToResult
 
 def restfulAPICall(funcName,funcArgsJson):
     # 调用你的本地 Flask 服务
@@ -33,10 +20,19 @@ def restfulAPICall(funcName,funcArgsJson):
     return str(result)
 
 class MCPHost:
-    def __init__(self, llmModel,systemPrompt):
+    def __init__(self, llmModel,systemPrompt,toolCallMaxTry=10):
         self.mcpClientSessionManager = MCPClientSessionManager()
         self.llmModel=llmModel
-        self.systemPrompt=systemPrompt
+
+        self.toolCallMaxTry=toolCallMaxTry
+
+        self.chatContextWindowSize=20
+        self.chatContext=[]
+        systemMessage={
+                    "role": "system",
+                    "content": systemPrompt
+                    }
+        self.chatContext.append(systemMessage)
 
     async def connect_to_stdio_server(self,serverParameters:StdioServerParameters):
         await self.mcpClientSessionManager.connect_to_stdio_server(serverParameters)
@@ -59,43 +55,67 @@ class MCPHost:
                 print("\n" + response)
             except Exception as e:
                  print(f"Error: {e}")
+                 # 打印调用栈信息
+                 traceback.print_exc()
+
+    async def tryCallTools(self):
+        for tryCount in range(self.toolCallMaxTry):
+            print(f"Try Tool calling <#{tryCount}>")
+            print(f"dialog context: {self.chatContext}")
+            choice = self.llmModel.Chat(self.chatContext, self.mcpClientSessionManager.get_mcp_tools())
+            self.llmModel.addMessageFromChoice(self.chatContext,choice)
+
+            toolsToCall=self.llmModel.ParseToolCallMessage(choice)
+            if toolsToCall is None:
+                """No tool call needed.
+                """
+                role, content = self.llmModel.getMessageFromChoice(choice)
+                return content
+
+            allToolCallFailed=True
+            for funName, funcArgs, tool_call_id in toolsToCall:
+                from mcp.types import TextContent
+                from typing import Optional
+                toolCallResult: Optional[TextContent] = None
+                toolCallResult=await self.mcpClientSessionManager.execute_tool(funName, funcArgs)
+
+                content=toolCallResult.content
+                isError=toolCallResult.isError
+                if isError==False:
+                    allToolCallFailed=False
+
+                # result=restfulAPICall(func_name,func_args)
+                myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> tool_call\n\tfun name:{funName}\n\t isError:{isError}\n\treturn content:{content}")
+                #myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> tool_call content[0].\n   type:{type(content[0])}\n   content:{content[0]}")
+
+                toolMessage = {"role": "tool",
+                               "tool_call_id": tool_call_id,
+                               "content": serialize_MCPCallToResult(toolCallResult)}
+                self.chatContext.append(toolMessage)
+
+            if allToolCallFailed:
+                userMessage={
+                    "role": "user",
+                    "content": "请重新尝试找到合适的工具,再回答我的的问题."
+                }
+                self.chatContext.append(userMessage)
+            else:
+                break
+
+        choice = self.llmModel.Chat(self.chatContext,tools=self.mcpClientSessionManager.get_mcp_tools())
+        role,content=self.llmModel.getMessageFromChoice(choice)
+        return content
 
     async def process_query(self, query: str) -> str:
         """Process a query using LLMModel and available tools"""
-        messages = []
-        systemMessage={
-                    "role": "system",
-                    "content": self.systemPrompt
-                    }
-        messages.append(systemMessage)
+        if len(self.chatContext)>self.chatContextWindowSize:
+            del self.chatContext[1:(len(self.chatContext)-self.chatContextWindowSize+2)]
+
         userMessage = {
                     "role": "user",
                     "content": query
                 }
-        messages.append(userMessage)
-        choice = self.llmModel.Chat(messages, self.mcpClientSessionManager.get_mcp_tools())
-        self.llmModel.addMessageFromChoice(messages,choice)
-
-        toolsToCall=self.llmModel.ParseToolCallMessage(choice)
-        for funName, funcArgs, tool_call_id in toolsToCall:
-            from mcp.types import TextContent
-            from typing import Optional
-            toolCallResult: Optional[TextContent] = None
-            toolCallResult=await self.mcpClientSessionManager.execute_tool(funName, funcArgs)
-
-            content=toolCallResult.content
-            isError=toolCallResult.isError
-
-            # result=restfulAPICall(func_name,func_args)
-            myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> tool_call\n\tfun name:{funName}\n\t isError:{isError}\n\treturn content:{content}")
-            #myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> tool_call content[0].\n   type:{type(content[0])}\n   content:{content[0]}")
-
-            toolMessage = {"role": "tool",
-                           "tool_call_id": tool_call_id,
-                           "content": serialize_MCPCallToResult(toolCallResult)}
-            messages.append(toolMessage)
-
-        choice = self.llmModel.Chat(messages,tools=None)
-        role,content=self.llmModel.getMessageFromChoice(choice)
+        self.chatContext.append(userMessage)
+        content= await self.tryCallTools()
         return f"Assistant>\t {content}"
 

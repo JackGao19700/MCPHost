@@ -52,7 +52,7 @@ class OpenAIModel(llmModelWrapper):
 
     def ParseToolCallMessage(self,choice):
         if choice.finish_reason != "tool_calls" and choice.finish_reason != "function_call":
-            return []
+            return None
 
         message: ChatCompletionMessage = choice.message
         myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> response message {message}")
@@ -109,7 +109,7 @@ class localOllamaModel(llmModelWrapper):
 
     def ParseToolCallMessage(self,choice):
         if choice["finish_reason"] != "tool_calls" and choice["finish_reason"] != "function_call":
-            return []
+            return None
 
         message= choice["message"]
         myLogger(f"<Fun:{inspect.currentframe().f_code.co_name}> response message {message}")
